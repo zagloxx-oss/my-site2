@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <android/log.h>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "AWANGARD", __VA_ARGS__)
@@ -155,7 +156,7 @@ void* flag_watcher(void* arg) {
             }
             fclose(f);
         }
-        usleep(100000); // 100 мс
+        usleep(100000);
     }
     return NULL;
 }
@@ -181,7 +182,6 @@ void lib_init(void) {
     LOG("UWorld = 0x%lx", get_uworld());
     LOG("LocalPawn = 0x%lx", get_local_pawn());
 
-    // Создаём флаг-файл, если нет
     FILE* f = fopen(FLAGS_FILE, "w");
     if (f) {
         fprintf(f, "0 0 0 90.0");
@@ -189,7 +189,6 @@ void lib_init(void) {
         chmod(FLAGS_FILE, 0666);
     }
 
-    // Запускаем watcher флагов
     pthread_t t;
     pthread_create(&t, NULL, flag_watcher, NULL);
 
