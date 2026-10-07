@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <android/log.h>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "AWANGARD", __VA_ARGS__)
@@ -13,8 +14,6 @@
 #define OFF_PlayerArray         0x418
 #define OFF_PlayerController    0x38
 #define OFF_AcknowledgedPawn    0x4A8
-#define OFF_RootComponent       0x3E8
-#define OFF_ComponentLocation   0x330
 #define OFF_PlayerCameraManager 0x4D0
 #define OFF_CameraCacheFOV      0x10C0
 #define OFF_WeaponProcessor     0x958
@@ -24,9 +23,13 @@
 #define OFF_VerticalRecovery    0x11B8
 #define OFF_DeltaTimeSeconds    0x8C0
 
+#define FLAGS_FILE "/data/local/tmp/awangard_flags.txt"
+
 static int mem_fd = -1;
 static unsigned long ue4_base = 0;
+static volatile int running = 1;
 
+// ==================== ЧТЕНИЕ / ЗАПИСЬ ====================
 static unsigned long read_ptr(unsigned long addr) {
     unsigned long v = 0;
     if (lseek(mem_fd, addr, SEEK_SET) < 0) return 0;
@@ -71,11 +74,14 @@ static unsigned long get_local_pawn() {
     return read_ptr(pc + OFF_AcknowledgedPawn);
 }
 
-// ==================== ФУНКЦИИ ====================
+// ==================== ФУНКЦИИ ЧИТА ====================
 void cheat_no_recoil(int enable) {
-    LOG("no_recoil(%d)", enable);
+    static int last_state = -1;
+    if (enable == last_state) return;
+    last_state = enable;
+
     unsigned long pawn = get_local_pawn();
-    if (!pawn) { LOG("pawn NULL"); return; }
+    if (!pawn) return;
     unsigned long wp = read_ptr(pawn + OFF_WeaponProcessor);
     if (!wp) return;
     unsigned long weapons = read_ptr(wp + OFF_EquippedWeapons);
@@ -84,6 +90,7 @@ void cheat_no_recoil(int enable) {
     if (!cur) return;
     unsigned long traj = read_ptr(cur + OFF_WeaponTrajectory);
     if (!traj) return;
+
     if (enable) {
         write_float(traj + OFF_RecoilValue, 0.0f);
         write_float(traj + OFF_RecoilValue + 4, 0.0f);
@@ -97,6 +104,10 @@ void cheat_no_recoil(int enable) {
 }
 
 void cheat_set_fov(float fov) {
+    static float last_fov = -1;
+    if (fov == last_fov) return;
+    last_fov = fov;
+
     unsigned long pawn = get_local_pawn();
     if (!pawn) return;
     unsigned long pc = read_ptr(pawn + OFF_PlayerController);
@@ -108,26 +119,79 @@ void cheat_set_fov(float fov) {
 }
 
 void cheat_120fps(int enable) {
+    static int last_state = -1;
+    if (enable == last_state) return;
+    last_state = enable;
+
     unsigned long uworld = get_uworld();
     if (!uworld) return;
-    write_float(uworld + OFF_DeltaTimeSeconds, enable ? (1.0f/120.0f) : (1.0f/60.0f));
+    write_float(uworld + OFF_DeltaTimeSeconds,
+                enable ? (1.0f / 120.0f) : (1.0f / 60.0f));
     LOG("120fps: %d", enable);
 }
 
 void cheat_magic_bullets(int enable) {
-    LOG("magic_bullets: %d (stub)", enable);
+    static int last_state = -1;
+    if (enable == last_state) return;
+    last_state = enable;
+    LOG("magic_bullets: %d", enable);
 }
 
+// ==================== ЧТЕНИЕ ФЛАГОВ ====================
+void* flag_watcher(void* arg) {
+    (void)arg;
+    LOG("flag watcher started");
+
+    while (running) {
+        FILE* f = fopen(FLAGS_FILE, "r");
+        if (f) {
+            int norecoil = 0, fps120 = 0, magic = 0;
+            float fov = 90.0f;
+            if (fscanf(f, "%d %d %d %f", &norecoil, &fps120, &magic, &fov) >= 3) {
+                cheat_no_recoil(norecoil);
+                cheat_120fps(fps120);
+                cheat_magic_bullets(magic);
+                if (fov >= 60.0f && fov <= 200.0f) cheat_set_fov(fov);
+            }
+            fclose(f);
+        }
+        usleep(100000); // 100 мс
+    }
+    return NULL;
+}
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
 __attribute__((constructor))
 void lib_init(void) {
     LOG("=== AWANGARD CHEAT loaded ===");
     LOG("pid = %d", getpid());
+
     mem_fd = open("/proc/self/mem", O_RDWR);
-    if (mem_fd < 0) { LOG("ERROR /proc/self/mem"); return; }
+    if (mem_fd < 0) {
+        LOG("ERROR: cannot open /proc/self/mem");
+        return;
+    }
+
     ue4_base = find_base("libUE4.so");
-    if (!ue4_base) { LOG("ERROR libUE4.so not found"); return; }
+    if (!ue4_base) {
+        LOG("ERROR: libUE4.so not found");
+        return;
+    }
     LOG("libUE4.so base = 0x%lx", ue4_base);
     LOG("UWorld = 0x%lx", get_uworld());
     LOG("LocalPawn = 0x%lx", get_local_pawn());
+
+    // Создаём флаг-файл, если нет
+    FILE* f = fopen(FLAGS_FILE, "w");
+    if (f) {
+        fprintf(f, "0 0 0 90.0");
+        fclose(f);
+        chmod(FLAGS_FILE, 0666);
+    }
+
+    // Запускаем watcher флагов
+    pthread_t t;
+    pthread_create(&t, NULL, flag_watcher, NULL);
+
     LOG("=== INIT DONE ===");
 }
