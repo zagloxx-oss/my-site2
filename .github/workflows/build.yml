@@ -1,0 +1,28 @@
+name: Build libGCloudVoice.so
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Build libGCloudVoice.so
+        run: |
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+            -shared -fPIC -O2 -o libGCloudVoice.so libGCloudVoice.c -llog
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libGCloudVoice
+          path: libGCloudVoice.so
