@@ -3,11 +3,12 @@ name: Build Android Native Library
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Позволяет запускать сборку вручную, кнопкой в интерфейсе GitHub
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -15,11 +16,17 @@ jobs:
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
-          # Можно указать любую версию NDK. r26b — стабильная и свежая.
           ndk-version: r26b
 
       - name: Install Ninja
         run: sudo apt-get install ninja-build -y
+
+      - name: List files in workspace
+        run: |
+          echo "=== Root ==="
+          ls -la
+          echo "=== Workflow dir ==="
+          ls -la .github/workflows/
 
       - name: Configure CMake
         run: |
@@ -31,6 +38,9 @@ jobs:
 
       - name: Build library
         run: cmake --build build
+
+      - name: Show build result
+        run: ls -la build/
 
       - name: Upload .so artifact
         uses: actions/upload-artifact@v4
